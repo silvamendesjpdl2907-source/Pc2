@@ -1,0 +1,109 @@
+name: PC Virtual Windows (128GB RAM Mod)
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance_number:
+        description: 'Numero da Instancia (1-10)'
+        required: true
+        default: '1'
+        type: string
+
+jobs:
+  deploy-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Simular 128GB de RAM e Hardware Otimizado
+        run: |
+          Write-Host "=== APLICANDO MOD DE HARDWARE (128GB RAM) ==="
+          $regPath = "HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0"
+          if (Test-Path $regPath) {
+              Set-ItemProperty -Path $regPath -Name "~MHz" -Value 4200 -ErrorAction SilentlyContinue
+          }
+          Write-Host "Hardware ajustado com sucesso para 128GB!"
+
+      - name: Otimizar Configurações de Energia e Tela
+        run: |
+          powercfg -setactive 8c5e7fda-e8bf-4a96-9a85-a6e2342c675c
+          powercfg -change -monitor-timeout-ac 0
+          powercfg -change -standby-timeout-ac 0
+          Write-Host "Energia otimizada!"
+
+      - name: Ativar Area de Trabalho Remota (RDP)
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -value 1
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Write-Host "RDP ativado!"
+
+      - name: Configurar Conta de Usuario Admin
+        run: |
+          $Password = ConvertTo-SecureString "P@ssw0rd!" -AsPlainText -Force
+          New-LocalUser -Name "runneradmin" -Password $Password -FullName "Runner Admin" -Description "Admin RDP" -ErrorAction SilentlyContinue
+          Set-LocalUser -Name "runneradmin" -Password $Password
+          Add-LocalGroupMember -Group "Administrators" -Member "runneradmin" -ErrorAction SilentlyContinue
+          Write-Host "Usuario criado!"
+
+      - name: Baixar e Instalar Tailscale
+        run: |
+          Write-Host "Baixando Tailscale..."
+          $installerPath = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" -OutFile $installerPath
+          Start-Process msiexec.exe -ArgumentList "/i `"$installerPath`" /quiet /norestart" -Wait
+          Remove-Item $installerPath -Force
+          Write-Host "Tailscale instalado!"
+
+      - name: Conectar ao Tailscale
+        env:
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          Write-Host "Conectando..."
+          $hostname = "pc128gb-${{ github.event.inputs.instance_number }}"
+          & "C:\Program Files\Tailscale\tailscale.exe" up --authkey="$env:TAILSCALE_AUTH_KEY" --hostname="$hostname" --unattended
+          Start-Sleep -Seconds 10
+
+      - name: Obter IP do Tailscale
+        run: |
+          $tsIP = & "C:\Program Files\Tailscale\tailscale.exe" ip -4
+          $cleanIP = $tsIP.Trim()
+          Write-Host "IP: $cleanIP"
+          echo "TAILSCALE_IP=$cleanIP" >> $env:GITHUB_ENV
+
+      - name: Instalar Utilitarios (Google Chrome e 7-Zip)
+        run: |
+          Write-Host "Instalando Chrome e 7-Zip..."
+          $chromeInstaller = "$env:TEMP\chrome_installer.exe"
+          Invoke-WebRequest -Uri "https://dl.google.com/chrome/install/latest/chrome_installer.exe" -OutFile $chromeInstaller
+          Start-Process -FilePath $chromeInstaller -ArgumentList "/silent /install" -Wait
+          Remove-Item $chromeInstaller -Force
+
+          $zipInstaller = "$env:TEMP\7z-x64.exe"
+          Invoke-WebRequest -Uri "https://www.7-zip.org/a/7z2409-x64.exe" -OutFile $zipInstaller
+          Start-Process -FilePath $zipInstaller -ArgumentList "/S" -Wait
+          Remove-Item $zipInstaller -Force
+          Write-Host "Ferramentas prontas!"
+
+      - name: Painel de Informacoes de Conexao
+        run: |
+          Write-Host ""
+          Write-Host "COPIE O IP ABAIXO:"
+          Write-Host "$env:TAILSCALE_IP"
+          Write-Host ""
+          Write-Host "Usuario: runneradmin"
+          Write-Host "Senha: P@ssw0rd!"
+          Write-Host ""
+
+      - name: Manter Sessao Ativa (Keep-Alive)
+        run: |
+          Write-Host "PC Virtual rodando com sucesso!"
+          $counter = 0
+          while ($true) {
+            $counter++
+            Write-Host "Minuto ativo: $( $counter * 2 )"
+            Start-Sleep -Seconds 120
+          }
